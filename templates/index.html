@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Location Alarm with Map</title>
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_GOOGLE_MAPS_API_KEY"></script>
+    <style>
+        #map {
+            height: 400px;
+            width: 100%;
+        }
+        body {
+            font-family: Arial, sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <h1>Location Alarm</h1>
+    <p>Map showing your location and proximity:</p>
+    <div id="map"></div>
+    <p>Devices within 10 meters:</p>
+    <ul id="device-list"></ul>
+
+    <script>
+        const socket = io();
+
+        let map, circle, userMarker;
+        const targetLocation = { lat: 37.7749, lng: -122.4194 }; // Replace with your target latitude and longitude
+        const targetRadius = 10; // 10-meter radius
+
+        function initMap() {
+            // Initialize Google Map
+            map = new google.maps.Map(document.getElementById("map"), {
+                center: targetLocation,
+                zoom: 18,
+            });
+
+            // Draw the target location circle
+            circle = new google.maps.Circle({
+                strokeColor: "red",
+                strokeOpacity: 0.8,
+                strokeWeight: 2,
+                fillColor: "red",
+                fillOpacity: 0.35,
+                map,
+                center: targetLocation,
+                radius: targetRadius,
+            });
+
+            // Add user marker
+            userMarker = new google.maps.Marker({
+                map,
+                position: targetLocation,
+                title: "Your location",
+            });
+        }
+
+        function updateCircleColor(inRange) {
+            const color = inRange ? "green" : "red";
+            circle.setOptions({
+                strokeColor: color,
+                fillColor: color,
+            });
+        }
+
+        function calculateDistance(lat1, lng1, lat2, lng2) {
+            const R = 6371e3; // Earth radius in meters
+            const φ1 = (lat1 * Math.PI) / 180;
+            const φ2 = (lat2 * Math.PI) / 180;
+            const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+            const Δλ = ((lng2 - lng1) * Math.PI) / 180;
+
+            const a =
+                Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+                Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+            return R * c; // Distance in meters
+        }
+
+        async function fetchDevices() {
+            const response = await fetch('/scan');
+            const devices = await response.json();
+            const list = document.getElementById('device-list');
+            list.innerHTML = '';
+
+            if (devices.length > 0) {
+                devices.forEach(device => {
+                    const item = document.createElement('li');
+                    item.textContent = `ID: ${device.id}, Distance: ${device.distance}m`;
+                    list.appendChild(item);
+                });
+
+                const alarm = new Audio('/static/alarm.mp3'); // Replace with your alarm file
+                alarm.play();
+            }
+        }
+
+        function trackUserLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.watchPosition(
+                    (position) => {
+                        const { latitude, longitude } = position.coords;
+
+                        // Update user marker position
+                        userMarker.setPosition({ lat: latitude, lng: longitude });
+
+                        // Check proximity to target location
+                        const distance = calculateDistance(
+                            latitude,
+                            longitude,
+                            targetLocation.lat,
+                            targetLocation.lng
+                        );
+
+                        updateCircleColor(distance <= targetRadius);
+
+                        if (distance <= targetRadius) {
+                            const alarm = new Audio('/static/alarm.mp3');
+                            alarm.play();
+                        }
+                    },
+                    (error) => {
+                        console.error("Error tracking location:", error);
+                    }
+                );
+            } else {
+                alert("Geolocation is not supported by this browser.");
+            }
+        }
+
+        socket.on('alarm', (data) => {
+            alert(`Alarm triggered for device: ${data.device_id}`);
+        });
+
+        window.onload = () => {
+            initMap();
+            trackUserLocation();
+            setInterval(fetchDevices, 3000); // Fetch devices every 3 seconds
+        };
+    </script>
+</body>
+</html>
