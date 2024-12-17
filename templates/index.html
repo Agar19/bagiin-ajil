@@ -24,20 +24,18 @@
     <ul id="device-list"></ul>
 
     <script>
-        const socket = io();
+        const socket = io("http://localhost:5000"); // Replace with server IP if needed
 
         let map, circle, userMarker;
-        const targetLocation = { lat: 37.7749, lng: -122.4194 }; // Replace with your target latitude and longitude
+        const targetLocation = { lat: 37.7749, lng: -122.4194 }; // Replace with your target location
         const targetRadius = 10; // 10-meter radius
 
         function initMap() {
-            // Initialize Google Map
             map = new google.maps.Map(document.getElementById("map"), {
                 center: targetLocation,
                 zoom: 18,
             });
 
-            // Draw the target location circle
             circle = new google.maps.Circle({
                 strokeColor: "red",
                 strokeOpacity: 0.8,
@@ -49,7 +47,6 @@
                 radius: targetRadius,
             });
 
-            // Add user marker
             userMarker = new google.maps.Marker({
                 map,
                 position: targetLocation,
@@ -66,7 +63,7 @@
         }
 
         function calculateDistance(lat1, lng1, lat2, lng2) {
-            const R = 6371e3; // Earth radius in meters
+            const R = 6371e3;
             const φ1 = (lat1 * Math.PI) / 180;
             const φ2 = (lat2 * Math.PI) / 180;
             const Δφ = ((lat2 - lat1) * Math.PI) / 180;
@@ -77,7 +74,7 @@
                 Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
             const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-            return R * c; // Distance in meters
+            return R * c;
         }
 
         async function fetchDevices() {
@@ -86,16 +83,11 @@
             const list = document.getElementById('device-list');
             list.innerHTML = '';
 
-            if (devices.length > 0) {
-                devices.forEach(device => {
-                    const item = document.createElement('li');
-                    item.textContent = `ID: ${device.id}, Distance: ${device.distance}m`;
-                    list.appendChild(item);
-                });
-
-                const alarm = new Audio('/static/alarm.mp3'); // Replace with your alarm file
-                alarm.play();
-            }
+            devices.forEach(device => {
+                const item = document.createElement('li');
+                item.textContent = `ID: ${device.id}, Distance: ${device.distance}m`;
+                list.appendChild(item);
+            });
         }
 
         function trackUserLocation() {
@@ -103,11 +95,8 @@
                 navigator.geolocation.watchPosition(
                     (position) => {
                         const { latitude, longitude } = position.coords;
-
-                        // Update user marker position
                         userMarker.setPosition({ lat: latitude, lng: longitude });
 
-                        // Check proximity to target location
                         const distance = calculateDistance(
                             latitude,
                             longitude,
@@ -131,14 +120,26 @@
             }
         }
 
+        socket.on('devices_update', (data) => {
+            const list = document.getElementById('device-list');
+            list.innerHTML = '';
+            data.devices.forEach(device => {
+                const item = document.createElement('li');
+                item.textContent = `ID: ${device.id}, Distance: ${device.distance}m`;
+                list.appendChild(item);
+            });
+        });
+
         socket.on('alarm', (data) => {
             alert(`Alarm triggered for device: ${data.device_id}`);
+            const alarm = new Audio('/static/alarm.mp3');
+            alarm.play();
         });
 
         window.onload = () => {
             initMap();
             trackUserLocation();
-            setInterval(fetchDevices, 3000); // Fetch devices every 3 seconds
+            setInterval(fetchDevices, 3000);
         };
     </script>
 </body>

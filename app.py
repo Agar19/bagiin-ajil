@@ -3,27 +3,34 @@ from flask_socketio import SocketIO
 import threading
 import time
 from bleak import BleakScanner
+import asyncio
 
 app = Flask(__name__)
-socketio = SocketIO(app)
+socketio = SocketIO(app, cors_allowed_origins="*")  # Allow connections from all origins
 
 # BLE device data storage
 detected_devices = []
 
-def scan_ble_devices():
-    """Scan for BLE devices and update detected_devices."""
-    global detected_devices
-    while True:
-        devices = BleakScanner.discover()  # Discover nearby BLE devices
-        detected_devices = [{"id": d.address, "rssi": d.rssi} for d in devices]
-        time.sleep(2)  # Scan interval
-
 def calculate_distance(rssi):
     """Approximates the distance based on RSSI."""
-    tx_power = -59  # RSSI at 1 meter, adjust based on your hardware
+    tx_power = -59  # Adjust this value based on your hardware
     if rssi == 0:
-        return -1  # Unable to determine
+        return -1  # Unknown distance
     return round(10 ** ((tx_power - rssi) / 20), 2)
+
+async def scan_ble_devices():
+    """Scans for BLE devices and emits updates."""
+    global detected_devices
+    while True:
+        devices = await BleakScanner.discover()
+        detected_devices = [
+            {"id": d.address, "rssi": d.rssi, "distance": calculate_distance(d.rssi)}
+            for d in devices
+        ]
+        # Filter devices within 10 meters
+        nearby_devices = [d for d in detected_devices if d["distance"] <= 10]
+        socketio.emit("devices_update", {"devices": nearby_devices})
+        await asyncio.sleep(2)  # Scan interval
 
 @app.route('/')
 def index():
@@ -33,24 +40,19 @@ def index():
 def scan():
     """API endpoint to fetch nearby devices."""
     global detected_devices
-    devices = [
-        {"id": d["id"], "distance": calculate_distance(d["rssi"])}
-        for d in detected_devices
-        if calculate_distance(d["rssi"]) <= 10  # Filter devices within 10 meters
-    ]
-    return jsonify(devices)
+    nearby_devices = [d for d in detected_devices if d["distance"] <= 10]
+    return jsonify(nearby_devices)
 
 @app.route('/trigger_alarm', methods=['POST'])
 def trigger_alarm():
-    """Endpoint to notify a specific device."""
+    """Endpoint to trigger an alarm for a specific device."""
     data = request.get_json()
     target_device = data.get("device_id")
-    socketio.emit('alarm', {'device_id': target_device}, broadcast=True)
-    return jsonify({"message": "Alarm triggered"}), 200
+    socketio.emit('alarm', {'device_id': target_device})
+    return jsonify({"message": f"Alarm triggered for {target_device}"}), 200
 
 if __name__ == '__main__':
-    # Start the BLE scanning in a separate thread
-    threading.Thread(target=scan_ble_devices, daemon=True).start()
-
-    # Run the Flask app with SocketIO
-    socketio.run(app, debug=True)
+    # Start BLE scanning in a background thread
+    threading.Thread(target=lambda: asyncio.run(scan_ble_devices()), daemon=True).start()
+    # Run Flask app
+    socketio.run(app, host="10.3.130.92", debug=True)
